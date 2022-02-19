@@ -1,0 +1,12 @@
+route collection in progress, standby, this can take up to 1 minute to complete...
+
+2022-21-01 03:02:06 route collection output:
+
+edge01.lab:
+**** Transit facing AGG ROUTE 200.220.20.0/24 SOURCED locally from rs01.lab ****
+Learning mitigation agg route: 200.220.20.0/24 from 150.150.224.3 - rs01-ens4.lab
+Advertising prefix: 200.220.20.0/24 to transit peer 100.100.10.20 - v123.lab.transit1.net.
+Advertising prefix: 200.220.20.0/24 to transit peer 100.100.10.10 - v321.lab.transit2.net.
+
+TMS tms1.lab(10.0.0.14) advertising mitigation source prefix 200.220.20.74/32 to rs01.lab for upstream mitigation agg route 200.220.20.0/24
+
