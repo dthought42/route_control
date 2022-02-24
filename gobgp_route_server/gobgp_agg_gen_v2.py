@@ -1,5 +1,5 @@
 #!/usr/bin/python3.8
-# gobgp_agg_gen
+# gobgp_agg_gen.py
 
 from ipaddress import IPv4Address, IPv4Network, IPv6Address, IPv6Network
 import yaml
@@ -27,7 +27,8 @@ dcscm = site['dcscm'] # plain/decimal conditional static community
 dmtcm = site['dmtcm'] # plain/decimal mitigation community
 dagcm = site['dagcm'] # plain/decimal customer aggregate community
 drscm = site['drscm'] # plain/decimal route server aggregate community
-lp = site['lp'] # set higher local-pref value than customer routes
+btelp = site['btelp'] # bgp_te aggregate route local-pref
+brdlp = site['brdlp'] # bgp_redirect aggregate route local-pref
 
 loc_handler = RotatingFileHandler(filename='gobgp_agg_gen.log', backupCount=7, maxBytes=100 * 1024 ** 2)
 logging.getLogger("sh").setLevel(logging.WARNING)
@@ -49,8 +50,10 @@ syslog_frmtr = NoStacktraceFormatter(' %(name)s - %(levelname)s - %(message)s')
 syslog_handler.setFormatter(syslog_frmtr)
 syslog.addHandler(syslog_handler)
 
+### Generate customer v4/v6 /24/48 prefixes ###
 # For each gre advertised customer route:
-# Generate lists of ipv4 /24 prefixes & prefix/next-hop k/v dictionaries
+# Generate lists of ipv4/v6 /24/48 prefixes & attribute dictionary w/ prefix key
+# Dynamic dictionary values: community set, next-hop, local-pref
 # Return errors for invalid customer routes and continue
 def gen_custv4rts():
     jrts = list(filter(None, ((str(sh.jq(sh.gobgp(\
@@ -65,10 +68,12 @@ def gen_custv4rts():
                 pnh = IPv4Address((json.loads(js))['attrs'][5]['value']) -1
                 rcoms = [agcom, rscom, btecm]
                 rcoms.extend(scoms)
+                lp = str(btelp)
             except:
                 pnh = (json.loads(js))['attrs'][2]['nexthop']
                 rcoms = [agcom, rscom]
                 rcoms.extend(scoms)
+                lp = str(brdlp)
             arsos = list(IPv4Network(pfx).subnets(new_prefix=24))
             jcoms = json.dumps(rcoms)
             ars = []
@@ -76,7 +81,7 @@ def gen_custv4rts():
             for ar in arsos:
                 ars.append(str(ar))
                 attrld = {}
-                attrld[str(ar)] = [str(pnh), jcoms]
+                attrld[str(ar)] = [str(pnh), jcoms, lp]
                 attrlds.append(attrld)
             custv4rts.extend(ars)
             custv4attrds.extend(attrlds)
@@ -86,9 +91,6 @@ def gen_custv4rts():
             continue
     return custv4rts, custv4attrds
 
-# For each gre advertised customer route:
-# Generate lists of ipv6 /48 prefixes & prefix/next-hop k/v dictionaries
-# Return errors for invalid customer routes and continue
 def gen_custv6rts():
     jrts = list(filter(None, ((str(sh.jq(sh.gobgp(\
            "global","rib","-a","ipv6","-j"),"-M","-c",".[][] | select(contains({{attrs: [{{communities: [{0}]}}]}}))"\
@@ -102,10 +104,12 @@ def gen_custv6rts():
                 pnh = IPv6Address((json.loads(js))['attrs'][4]['value']) -1
                 rcoms = [agcom, rscom, btecm]
                 rcoms.extend(scoms)
+                lp = str(btelp)
             except:
                 pnh = (json.loads(js))['attrs'][4]['nexthop']
                 rcoms = [agcom, rscom]
                 rcoms.extend(scoms)
+                lp = str(brdlp)
             arsos = list(IPv6Network(pfx).subnets(new_prefix=48))
             jcoms = json.dumps(rcoms)
             ars = []
@@ -113,7 +117,7 @@ def gen_custv6rts():
             for ar in arsos:
                 ars.append(str(ar))
                 attrld = {}
-                attrld[str(ar)] = [str(pnh), jcoms]
+                attrld[str(ar)] = [str(pnh), jcoms, lp]
                 attrlds.append(attrld)
             custv6rts.extend(ars)
             custv6attrds.extend(attrlds)
@@ -123,7 +127,7 @@ def gen_custv6rts():
             continue
     return custv6rts, custv6attrds
 
-# Generate list of ipv4 /24 prefixes for each mitigation route from mitigation peer, remove duplicates
+### Generate v4/v6 /24/48 prefix for each mitigation route(s) from mitigation peer, remove duplicates ###
 def gen_mitv4rts():
     mrts = list(filter(None,((sh.jq(sh.gobgp(\
            "global","rib","-a","ipv4","-j"),"-M","-r",".[][] | select(contains({{attrs: [{{communities: [{0}]}}]}})) | .nlri.prefix"\
@@ -140,7 +144,6 @@ def gen_mitv4rts():
     mitv4rts = list(dict.fromkeys(mitrts))
     return mitv4rts
 
-# Generate list of ipv6 /48 prefixes for each mitigation route from mitigation peer, remove duplicates
 def gen_mitv6rts():
     mrts = list(filter(None,((sh.jq(sh.gobgp(\
            "global","rib","-a","ipv6","-j"),"-M","-r",".[][] | select(contains({{attrs: [{{communities: [{0}]}}]}})) | .nlri.prefix"\
@@ -157,8 +160,8 @@ def gen_mitv6rts():
     mitv6rts = list(dict.fromkeys(mitrts))
     return mitv6rts
 
-# match ipv4 /24 mit routes to /24 cust routes
-# inject matching /24 agg routes w/ NH & agg/rs comm's if not already in RIB
+# match v4/v6 /24/48 mit routes to /24/48 cust routes
+# inject matching /24/48 agg routes w/ attributes if not already in RIB
 # remove old routes if not in addrts
 def update_v4rib(custv4rts, custv4attrds, mitv4rts):
     try:
@@ -173,7 +176,8 @@ def update_v4rib(custv4rts, custv4attrds, mitv4rts):
             try:
                 nhi = list(dict.fromkeys([d[str(injrt)][0] for d in custv4attrds if str(injrt) in d]))[0]
                 cmi = list(dict.fromkeys([d[str(injrt)][1] for d in custv4attrds if str(injrt) in d]))[0]
-                sh.gobgp("global","rib","add",str(injrt),"-a","ipv4","community",cmi,"local-pref",lp,"origin","igp","nexthop",nhi)
+                lpi = list(dict.fromkeys([d[str(injrt)][2] for d in custv4attrds if str(injrt) in d]))[0]
+                sh.gobgp("global","rib","add",str(injrt),"-a","ipv4","community",cmi,"local-pref",lpi,"origin","igp","nexthop",nhi)
             except Exception as e:
                 logging.getLogger('gobgp_agg_gen.py python3.8').error(host + ' update_v4rib inject route error:\n' +\
                 str(traceback.format_exc()).split('\n')[2] + '\n' + str(traceback.format_exc()).split('\n')[-2])
@@ -182,7 +186,8 @@ def update_v4rib(custv4rts, custv4attrds, mitv4rts):
             try:
                 nhd = list(dict.fromkeys([d[str(delrt)][0] for d in custv4attrds if str(delrt) in d]))[0]
                 cmd = list(dict.fromkeys([d[str(delrt)][1] for d in custv4attrds if str(delrt) in d]))[0]
-                sh.gobgp("global","rib","del",str(delrt),"-a","ipv4","community",cmd,"local-pref",lp,"origin","igp","nexthop",nhd)
+                lpd = list(dict.fromkeys([d[str(delrt)][2] for d in custv4attrds if str(delrt) in d]))[0]
+                sh.gobgp("global","rib","del",str(delrt),"-a","ipv4","community",cmd,"local-pref",lpd,"origin","igp","nexthop",nhd)
             except Exception as e:
                 logging.getLogger('gobgp_agg_gen.py python3.8').error(host + ' update_v4rib delete route error:\n' +\
                 str(traceback.format_exc()).split('\n')[2] + '\n' + str(traceback.format_exc()).split('\n')[-2])
@@ -191,9 +196,6 @@ def update_v4rib(custv4rts, custv4attrds, mitv4rts):
             logging.getLogger('gobgp_agg_gen.py python3.8').error(host + ' update_v4rib function error:\n' +\
             str(traceback.format_exc()).split('\n')[2] + '\n' + str(traceback.format_exc()).split('\n')[-2])
 
-# match ipv6 /48 mit routes to /48 cust routes
-# inject matching /48 agg routes w/ NH & agg/rs comm's if not already in RIB
-# remove old routes if not in addrts
 def update_v6rib(custv6rts, custv6attrds, mitv6rts):
     try:
         addrts = sorted((list(set(mitv6rts).intersection(set(custv6rts)))), key = IPv6Network)
@@ -207,7 +209,8 @@ def update_v6rib(custv6rts, custv6attrds, mitv6rts):
             try:
                 nhi = list(dict.fromkeys([d[str(injrt)][0] for d in custv6attrds if str(injrt) in d]))[0]
                 cmi = list(dict.fromkeys([d[str(injrt)][1] for d in custv6attrds if str(injrt) in d]))[0]
-                sh.gobgp("global","rib","add",str(injrt),"-a","ipv6","community",cmi,"local-pref",lp,"origin","igp","nexthop",nhi)
+                lpi = list(dict.fromkeys([d[str(injrt)][2] for d in custv6attrds if str(injrt) in d]))[0]
+                sh.gobgp("global","rib","add",str(injrt),"-a","ipv6","community",cmi,"local-pref",lpi,"origin","igp","nexthop",nhi)
             except Exception as e:
                 logging.getLogger('gobgp_agg_gen.py python3.8').error(host + ' update_v6rib inject route error:\n' +\
                 str(traceback.format_exc()).split('\n')[2] + '\n' + str(traceback.format_exc()).split('\n')[-2])
@@ -216,7 +219,8 @@ def update_v6rib(custv6rts, custv6attrds, mitv6rts):
             try:
                 nhd = list(dict.fromkeys([d[str(delrt)][0] for d in custv6attrds if str(delrt) in d]))[0]
                 cmd = list(dict.fromkeys([d[str(delrt)][1] for d in custv6attrds if str(delrt) in d]))[0]
-                sh.gobgp("global","rib","del",str(delrt),"-a","ipv6","community",cmd,"local-pref",lp,"origin","igp","nexthop",nhd)
+                lpd = list(dict.fromkeys([d[str(delrt)][2] for d in custv6attrds if str(delrt) in d]))[0]
+                sh.gobgp("global","rib","del",str(delrt),"-a","ipv6","community",cmd,"local-pref",lpd,"origin","igp","nexthop",nhd)
             except Exception as e:
                 logging.getLogger('gobgp_agg_gen.py python3.8').error(host + ' update_v6rib delete route error:\n' +\
                 str(traceback.format_exc()).split('\n')[2] + '\n' + str(traceback.format_exc()).split('\n')[-2])
@@ -225,7 +229,7 @@ def update_v6rib(custv6rts, custv6attrds, mitv6rts):
             logging.getLogger('gobgp_agg_gen.py python3.8').error(host + ' update_v6rib error:\n' +\
             str(traceback.format_exc()).split('\n')[2] + '\n' + str(traceback.format_exc()).split('\n')[-2])
 
-# functions to update active agg routes on route server ipv4 RIB
+# functions to update active agg routes on route server - ipv4/ipv6 RIBs
 def ipv4_fs():
     try:
         custv4rts, custv4attrds = gen_custv4rts()
@@ -236,7 +240,6 @@ def ipv4_fs():
         logging.getLogger('gobgp_agg_gen.py python3.8').error(host + ' ipv4 function set error:\n' + 
                            str(traceback.format_exc()).split('\n')[2] + '\n' + str(traceback.format_exc()).split('\n')[-2])
 
-# functions to update active agg routes on route server ipv6 RIB
 def ipv6_fs():
     try:
         custv6rts, custv6attrds = gen_custv6rts()
