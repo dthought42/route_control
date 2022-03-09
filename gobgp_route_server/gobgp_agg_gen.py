@@ -1,5 +1,4 @@
 #!/usr/bin/python3.8
-# gobgp_agg_gen.py
 
 from ipaddress import IPv4Address, IPv4Network, IPv6Address, IPv6Network
 import yaml
@@ -65,12 +64,13 @@ def gen_custv4rts():
         try:
             pfx = (json.loads(js))['nlri']['prefix']
             try:
-                pnh = IPv4Address((json.loads(js))['attrs'][5]['value']) -1
+                pnh = IPv4Address(list(dict.fromkeys([d['value'] for d in \
+                        ((json.loads(js))['attrs']) if d['type']==9]))[0]) -1
                 rcoms = [agcom, rscom, btecm]
                 rcoms.extend(scoms)
                 lp = str(btelp)
             except:
-                pnh = (json.loads(js))['attrs'][2]['nexthop']
+                pnh = list(dict.fromkeys([d['nexthop'] for d in ((json.loads(js))['attrs']) if d['type']==3]))[0]
                 rcoms = [agcom, rscom]
                 rcoms.extend(scoms)
                 lp = str(brdlp)
@@ -101,12 +101,13 @@ def gen_custv6rts():
         try:
             pfx = (json.loads(js))['nlri']['prefix']
             try:
-                pnh = IPv6Address((json.loads(js))['attrs'][4]['value']) -1
+                pnh = IPv6Address(list(dict.fromkeys([d['value'] for d in \
+                        ((json.loads(js))['attrs']) if d['type']==9]))[0]) -1
                 rcoms = [agcom, rscom, btecm]
                 rcoms.extend(scoms)
                 lp = str(btelp)
             except:
-                pnh = (json.loads(js))['attrs'][4]['nexthop']
+                pnh = list(dict.fromkeys([d['nexthop'] for d in ((json.loads(js))['attrs']) if d['type']==14]))[0]
                 rcoms = [agcom, rscom]
                 rcoms.extend(scoms)
                 lp = str(brdlp)
@@ -178,6 +179,7 @@ def update_v4rib(custv4rts, custv4attrds, mitv4rts):
                 cmi = list(dict.fromkeys([d[str(injrt)][1] for d in custv4attrds if str(injrt) in d]))[0]
                 lpi = list(dict.fromkeys([d[str(injrt)][2] for d in custv4attrds if str(injrt) in d]))[0]
                 sh.gobgp("global","rib","add",str(injrt),"-a","ipv4","community",cmi,"local-pref",lpi,"origin","igp","nexthop",nhi)
+                #print("global rib add {0} -a ipv4 community {1} local-pref {2} origin igp nexthop {3}".format(str(injrt),cmi,lpi,nhi))
             except Exception as e:
                 logging.getLogger('gobgp_agg_gen.py python3.8').error(host + ' update_v4rib inject route error:\n' +\
                 str(traceback.format_exc()).split('\n')[2] + '\n' + str(traceback.format_exc()).split('\n')[-2])
@@ -188,6 +190,7 @@ def update_v4rib(custv4rts, custv4attrds, mitv4rts):
                 cmd = list(dict.fromkeys([d[str(delrt)][1] for d in custv4attrds if str(delrt) in d]))[0]
                 lpd = list(dict.fromkeys([d[str(delrt)][2] for d in custv4attrds if str(delrt) in d]))[0]
                 sh.gobgp("global","rib","del",str(delrt),"-a","ipv4","community",cmd,"local-pref",lpd,"origin","igp","nexthop",nhd)
+                #print("global rib del {0} -a ipv4 community {1} local-pref {2} origin igp nexthop {3}".format(str(delrt),cmd,lpd,nhd))
             except Exception as e:
                 logging.getLogger('gobgp_agg_gen.py python3.8').error(host + ' update_v4rib delete route error:\n' +\
                 str(traceback.format_exc()).split('\n')[2] + '\n' + str(traceback.format_exc()).split('\n')[-2])
@@ -211,6 +214,7 @@ def update_v6rib(custv6rts, custv6attrds, mitv6rts):
                 cmi = list(dict.fromkeys([d[str(injrt)][1] for d in custv6attrds if str(injrt) in d]))[0]
                 lpi = list(dict.fromkeys([d[str(injrt)][2] for d in custv6attrds if str(injrt) in d]))[0]
                 sh.gobgp("global","rib","add",str(injrt),"-a","ipv6","community",cmi,"local-pref",lpi,"origin","igp","nexthop",nhi)
+                #print("global rib add {0} -a ipv6 community {1} local-pref {2} origin igp nexthop {3}".format(str(injrt),cmi,lpi,nhi))
             except Exception as e:
                 logging.getLogger('gobgp_agg_gen.py python3.8').error(host + ' update_v6rib inject route error:\n' +\
                 str(traceback.format_exc()).split('\n')[2] + '\n' + str(traceback.format_exc()).split('\n')[-2])
@@ -221,6 +225,7 @@ def update_v6rib(custv6rts, custv6attrds, mitv6rts):
                 cmd = list(dict.fromkeys([d[str(delrt)][1] for d in custv6attrds if str(delrt) in d]))[0]
                 lpd = list(dict.fromkeys([d[str(delrt)][2] for d in custv6attrds if str(delrt) in d]))[0]
                 sh.gobgp("global","rib","del",str(delrt),"-a","ipv6","community",cmd,"local-pref",lpd,"origin","igp","nexthop",nhd)
+                #print("global rib del {0} -a ipv6 community {1} local-pref {2} origin igp nexthop {3}".format(str(delrt),cmd,lpd,nhd))
             except Exception as e:
                 logging.getLogger('gobgp_agg_gen.py python3.8').error(host + ' update_v6rib delete route error:\n' +\
                 str(traceback.format_exc()).split('\n')[2] + '\n' + str(traceback.format_exc()).split('\n')[-2])
