@@ -1,9 +1,12 @@
 #!/usr/bin/python3.8
+# gobgp_agg_gen
+# David Weber - Network Automation Engineer
 
 from ipaddress import IPv4Address, IPv4Network, IPv6Address, IPv6Network
 import yaml
 import re
 import sh
+import multiprocessing as mp
 from multiprocessing import Process
 import logging
 from logging.handlers import RotatingFileHandler, SysLogHandler
@@ -36,12 +39,12 @@ ts = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 formatter = logging.Formatter('{} - %(name)s - %(levelname)s - %(message)s'.format(ts))
 loc_handler.setFormatter(formatter)
 loc_handler.setLevel(logging.INFO)
-slack_handler = SlackerLogHandler(slack_token,'gobgp_agg_gen_alerts',stack_trace=True)
-slacklog = logging.getLogger('gobgp_agg_gen.py python3.8')
-slacklog.addHandler(slack_handler)
-slack_frmtr = NoStacktraceFormatter('{} - %(name)s - %(levelname)s - %(message)s'.format(ts))
-slack_handler.setFormatter(slack_frmtr)
-slacklog.setLevel(logging.INFO)
+#slack_handler = SlackerLogHandler(slack_token,'gobgp_agg_gen_alerts',stack_trace=True)
+#slacklog = logging.getLogger('gobgp_agg_gen.py python3.8')
+#slacklog.addHandler(slack_handler)
+#slack_frmtr = NoStacktraceFormatter('{} - %(name)s - %(levelname)s - %(message)s'.format(ts))
+#slack_handler.setFormatter(slack_frmtr)
+#slacklog.setLevel(logging.INFO)
 syslog = logging.getLogger('gobgp_agg_gen.py python3.8')
 syslog.setLevel(logging.INFO)
 syslog_handler = SysLogHandler(address='/dev/log')
@@ -76,20 +79,20 @@ def gen_custv4rts():
                 lp = str(brdlp)
             arsos = list(IPv4Network(pfx).subnets(new_prefix=24))
             jcoms = json.dumps(rcoms)
-            ars = []
+            #ars = []
             attrlds = []
             for ar in arsos:
-                ars.append(str(ar))
+                #ars.append(str(ar))
                 attrld = {}
                 attrld[str(ar)] = [str(pnh), jcoms, lp]
                 attrlds.append(attrld)
-            custv4rts.extend(ars)
+            #custv4rts.extend(ars)
             custv4attrds.extend(attrlds)
         except Exception as e:
             logging.getLogger('gobgp_agg_gen.py python3.8').error(host + ' gen_custv4rts loop error:\n' +\
             str(traceback.format_exc()).split('\n')[2] + '\n' + str(traceback.format_exc()).split('\n')[-2])
             continue
-    return custv4rts, custv4attrds
+    return custv4attrds
 
 def gen_custv6rts():
     jrts = list(filter(None, ((str(sh.jq(sh.gobgp(\
@@ -113,20 +116,20 @@ def gen_custv6rts():
                 lp = str(brdlp)
             arsos = list(IPv6Network(pfx).subnets(new_prefix=48))
             jcoms = json.dumps(rcoms)
-            ars = []
+            #ars = []
             attrlds = []
             for ar in arsos:
-                ars.append(str(ar))
+                #ars.append(str(ar))
                 attrld = {}
                 attrld[str(ar)] = [str(pnh), jcoms, lp]
                 attrlds.append(attrld)
-            custv6rts.extend(ars)
+            #custv6rts.extend(ars)
             custv6attrds.extend(attrlds)
         except Exception as e:
             logging.getLogger('gobgp_agg_gen.py python3.8').error(host + ' gen_custv6rts loop error:\n' +\
             str(traceback.format_exc()).split('\n')[2] + '\n' + str(traceback.format_exc()).split('\n')[-2])
             continue
-    return custv6rts, custv6attrds
+    return custv6attrds
 
 ### Generate v4/v6 /24/48 prefix for each mitigation route(s) from mitigation peer, remove duplicates ###
 def gen_mitv4rts():
@@ -164,8 +167,9 @@ def gen_mitv6rts():
 # match v4/v6 /24/48 mit routes to /24/48 cust routes
 # inject matching /24/48 agg routes w/ attributes if not already in RIB
 # remove old routes if not in addrts
-def update_v4rib(custv4rts, custv4attrds, mitv4rts):
+def update_v4rib(custv4attrds, mitv4rts):
     try:
+        custv4rts = list(dict.fromkeys([k for d in custv4attrds for k in d.keys()]))
         addrts = sorted((list(set(mitv4rts).intersection(set(custv4rts)))), key = IPv4Network)
         oldrts = list(filter(None,((sh.jq(sh.gobgp(\
                  "global","rib","-a","ipv4","-j"),"-M","-r",".[][] | select\
@@ -179,28 +183,24 @@ def update_v4rib(custv4rts, custv4attrds, mitv4rts):
                 cmi = list(dict.fromkeys([d[str(injrt)][1] for d in custv4attrds if str(injrt) in d]))[0]
                 lpi = list(dict.fromkeys([d[str(injrt)][2] for d in custv4attrds if str(injrt) in d]))[0]
                 sh.gobgp("global","rib","add",str(injrt),"-a","ipv4","community",cmi,"local-pref",lpi,"origin","igp","nexthop",nhi)
-                #print("global rib add {0} -a ipv4 community {1} local-pref {2} origin igp nexthop {3}".format(str(injrt),cmi,lpi,nhi))
             except Exception as e:
                 logging.getLogger('gobgp_agg_gen.py python3.8').error(host + ' update_v4rib inject route error:\n' +\
                 str(traceback.format_exc()).split('\n')[2] + '\n' + str(traceback.format_exc()).split('\n')[-2])
                 continue
         for delrt in delrts:
             try:
-                nhd = list(dict.fromkeys([d[str(delrt)][0] for d in custv4attrds if str(delrt) in d]))[0]
-                cmd = list(dict.fromkeys([d[str(delrt)][1] for d in custv4attrds if str(delrt) in d]))[0]
-                lpd = list(dict.fromkeys([d[str(delrt)][2] for d in custv4attrds if str(delrt) in d]))[0]
-                sh.gobgp("global","rib","del",str(delrt),"-a","ipv4","community",cmd,"local-pref",lpd,"origin","igp","nexthop",nhd)
-                #print("global rib del {0} -a ipv4 community {1} local-pref {2} origin igp nexthop {3}".format(str(delrt),cmd,lpd,nhd))
+                sh.gobgp("global","rib","del",delrt,"-a","ipv4","community",rscom)
             except Exception as e:
                 logging.getLogger('gobgp_agg_gen.py python3.8').error(host + ' update_v4rib delete route error:\n' +\
                 str(traceback.format_exc()).split('\n')[2] + '\n' + str(traceback.format_exc()).split('\n')[-2])
                 continue
     except Exception as e:
-            logging.getLogger('gobgp_agg_gen.py python3.8').error(host + ' update_v4rib function error:\n' +\
-            str(traceback.format_exc()).split('\n')[2] + '\n' + str(traceback.format_exc()).split('\n')[-2])
+        logging.getLogger('gobgp_agg_gen.py python3.8').error(host + ' update_v4rib function error:\n' +\
+        str(traceback.format_exc()).split('\n')[2] + '\n' + str(traceback.format_exc()).split('\n')[-2])
 
-def update_v6rib(custv6rts, custv6attrds, mitv6rts):
+def update_v6rib(custv6attrds, mitv6rts):
     try:
+        custv6rts = list(dict.fromkeys([k for d in custv6attrds for k in d.keys()]))
         addrts = sorted((list(set(mitv6rts).intersection(set(custv6rts)))), key = IPv6Network)
         oldrts = list(filter(None,((sh.jq(sh.gobgp(\
                  "global","rib","-a","ipv6","-j"),"-M","-r",".[][] | select\
@@ -214,32 +214,27 @@ def update_v6rib(custv6rts, custv6attrds, mitv6rts):
                 cmi = list(dict.fromkeys([d[str(injrt)][1] for d in custv6attrds if str(injrt) in d]))[0]
                 lpi = list(dict.fromkeys([d[str(injrt)][2] for d in custv6attrds if str(injrt) in d]))[0]
                 sh.gobgp("global","rib","add",str(injrt),"-a","ipv6","community",cmi,"local-pref",lpi,"origin","igp","nexthop",nhi)
-                #print("global rib add {0} -a ipv6 community {1} local-pref {2} origin igp nexthop {3}".format(str(injrt),cmi,lpi,nhi))
             except Exception as e:
                 logging.getLogger('gobgp_agg_gen.py python3.8').error(host + ' update_v6rib inject route error:\n' +\
                 str(traceback.format_exc()).split('\n')[2] + '\n' + str(traceback.format_exc()).split('\n')[-2])
                 continue
         for delrt in delrts:
             try:
-                nhd = list(dict.fromkeys([d[str(delrt)][0] for d in custv6attrds if str(delrt) in d]))[0]
-                cmd = list(dict.fromkeys([d[str(delrt)][1] for d in custv6attrds if str(delrt) in d]))[0]
-                lpd = list(dict.fromkeys([d[str(delrt)][2] for d in custv6attrds if str(delrt) in d]))[0]
-                sh.gobgp("global","rib","del",str(delrt),"-a","ipv6","community",cmd,"local-pref",lpd,"origin","igp","nexthop",nhd)
-                #print("global rib del {0} -a ipv6 community {1} local-pref {2} origin igp nexthop {3}".format(str(delrt),cmd,lpd,nhd))
+                sh.gobgp("global","rib","del",delrt,"-a","ipv6","community",rscom)
             except Exception as e:
                 logging.getLogger('gobgp_agg_gen.py python3.8').error(host + ' update_v6rib delete route error:\n' +\
                 str(traceback.format_exc()).split('\n')[2] + '\n' + str(traceback.format_exc()).split('\n')[-2])
                 continue
     except Exception as e:
-            logging.getLogger('gobgp_agg_gen.py python3.8').error(host + ' update_v6rib error:\n' +\
-            str(traceback.format_exc()).split('\n')[2] + '\n' + str(traceback.format_exc()).split('\n')[-2])
+        logging.getLogger('gobgp_agg_gen.py python3.8').error(host + ' update_v6rib error:\n' +\
+        str(traceback.format_exc()).split('\n')[2] + '\n' + str(traceback.format_exc()).split('\n')[-2])
 
 # functions to update active agg routes on route server - ipv4/ipv6 RIBs
 def ipv4_fs():
     try:
-        custv4rts, custv4attrds = gen_custv4rts()
+        custv4attrds = gen_custv4rts()
         mitv4rts = gen_mitv4rts()
-        update_v4rib(custv4rts, custv4attrds, mitv4rts)
+        update_v4rib(custv4attrds, mitv4rts)
         logging.getLogger('gobgp_agg_gen.py python3.8').info('{} ipv4 agg routes updated'.format(host))
     except Exception as e:
         logging.getLogger('gobgp_agg_gen.py python3.8').error(host + ' ipv4 function set error:\n' + 
@@ -247,9 +242,9 @@ def ipv4_fs():
 
 def ipv6_fs():
     try:
-        custv6rts, custv6attrds = gen_custv6rts()
+        custv6attrds = gen_custv6rts()
         mitv6rts = gen_mitv6rts()
-        update_v6rib(custv6rts, custv6attrds, mitv6rts)
+        update_v6rib(custv6attrds, mitv6rts)
         logging.getLogger('gobgp_agg_gen.py python3.8').info('{} ipv6 agg routes updated'.format(host))
     except Exception as e:
         logging.getLogger('gobgp_agg_gen.py python3.8').error(host + ' ipv6 function set error:\n' + 
@@ -257,10 +252,11 @@ def ipv6_fs():
 
 # execute ipv4/ipv6 function sets with multiprocessing
 if __name__ == '__main__':
-  p1 = Process(target=ipv4_fs)
-  p1.start()
-  p2 = Process(target=ipv6_fs)
-  p2.start()
-  p1.join()
-  p2.join()
+    mp.set_start_method('fork')
+    p1 = mp.Process(target=ipv4_fs)
+    p1.start()
+    p1.join
+    p2 = mp.Process(target=ipv6_fs)
+    p2.start()
+    p2.join()
 
