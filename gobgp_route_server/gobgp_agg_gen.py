@@ -79,14 +79,11 @@ def gen_custv4rts():
                 lp = str(brdlp)
             arsos = list(IPv4Network(pfx).subnets(new_prefix=24))
             jcoms = json.dumps(rcoms)
-            #ars = []
             attrlds = []
             for ar in arsos:
-                #ars.append(str(ar))
                 attrld = {}
                 attrld[str(ar)] = [str(pnh), jcoms, lp]
                 attrlds.append(attrld)
-            #custv4rts.extend(ars)
             custv4attrds.extend(attrlds)
         except Exception as e:
             logging.getLogger('gobgp_agg_gen.py python3.8').error(host + ' gen_custv4rts loop error:\n' +\
@@ -116,14 +113,11 @@ def gen_custv6rts():
                 lp = str(brdlp)
             arsos = list(IPv6Network(pfx).subnets(new_prefix=48))
             jcoms = json.dumps(rcoms)
-            #ars = []
             attrlds = []
             for ar in arsos:
-                #ars.append(str(ar))
                 attrld = {}
                 attrld[str(ar)] = [str(pnh), jcoms, lp]
                 attrlds.append(attrld)
-            #custv6rts.extend(ars)
             custv6attrds.extend(attrlds)
         except Exception as e:
             logging.getLogger('gobgp_agg_gen.py python3.8').error(host + ' gen_custv6rts loop error:\n' +\
