@@ -49,7 +49,7 @@ s3d = dict(aws_access_key_id=key, aws_secret_access_key=secret)
 def upload_json_to_s3(sl_customers, s3d):
     session = boto3.Session(**s3d)
     s3 = session.client('s3')
-    response = s3.put_object(Body=(sl_customers), Bucket='netconfigs-uddos', Key='sl_customers.json')
+    response = s3.put_object(Body=(sl_customers), Bucket='sl_customers', Key='sl_customers.json')
     return response
 
 def get_json_config(url, atk): 
@@ -73,4 +73,4 @@ def get_json_config(url, atk):
 if __name__ == "__main__":
     sl_customers = get_json_config(url, atk)
     response = upload_json_to_s3(sl_customers, s3d)
-    logging.getLogger('get_mo.py python3.6').info('sl_customers.json updated - S3 netconfigs-uddos - VID: {0}'.format(response['VersionId']))
+    logging.getLogger('get_mo.py python3.6').info('sl_customers.json updated - S3 sl_customers - VID: {0}'.format(response['VersionId']))
