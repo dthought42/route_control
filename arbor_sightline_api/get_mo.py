@@ -24,7 +24,7 @@ logging.basicConfig(level=logging.INFO,
                                       maxBytes=100 * 1024 ** 2)])
 
 urllib3.disable_warnings()
-passphrase = 'MyAES_Pass_*_ssaP_SEAyM'.encode()
+passphrase = 'SANITIZED'.encode()
 settings_file = open('/settings/settings.yaml', 'r')
 settings = yaml.safe_load(settings_file)
 BLOCK_SIZE=16
