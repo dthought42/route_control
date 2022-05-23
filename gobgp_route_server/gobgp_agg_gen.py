@@ -85,6 +85,8 @@ def gen_mitv6rts():
 
 # Generate v4/v6 /24/48 aggregate route prefixes:
 # With nested multiprocessing for each gre advertised customer route:
+# v4/v6 customer json/mitigation prefix, Patricia trie matching - PyTricia
+# - https://github.com/jsommers/pytricia
 # - Generate lists of ipv4/v6 /24/48 prefixes & attribute dictionary w/ prefix key
 # - Dynamic dictionary values: community set, next-hop, local-pref
 # - Log errors for invalid customer routes and continue
