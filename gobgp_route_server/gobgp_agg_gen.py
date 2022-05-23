@@ -17,6 +17,9 @@ import traceback
 import datetime
 import json
 from pytricia import PyTricia
+import time 
+from time import time as dt
+from pprint import pprint
 
 host = '.'.join(socket.gethostname().split('.')[:2])
 site = yaml.safe_load(open('agg_gen.yml','r')) # settings
@@ -81,8 +84,6 @@ def gen_mitv6rts():
     return mitv6rts
 
 # Generate v4/v6 /24/48 aggregate route prefixes:
-# v4/v6 customer/mitigation Patricia trie matching - PyTricia
-# - https://github.com/jsommers/pytricia
 # With nested multiprocessing for each gre advertised customer route:
 # - Generate lists of ipv4/v6 /24/48 prefixes & attribute dictionary w/ prefix key
 # - Dynamic dictionary values: community set, next-hop, local-pref
@@ -90,7 +91,6 @@ def gen_mitv6rts():
 
 def gen_aggv4rts(js,mtrs):
     try:
-        pfx = (json.loads(js))['nlri']['prefix']
         try:
             pnh = IPv4Address(list(dict.fromkeys([d['value'] for d in \
                     ((json.loads(js))['attrs']) if d['type']==9]))[0]) -1
@@ -102,11 +102,8 @@ def gen_aggv4rts(js,mtrs):
             rcoms = [agcom, rscom]
             rcoms += scoms
             lp = brdlp
-        arsos = list(IPv4Network(pfx).subnets(new_prefix=24))
-        arsms = sorted((list(set(mtrs).intersection(set(arsos)))), key = IPv4Network)
-        if arsms:
-            aggv4attrds_w = [{str(ar): [str(pnh), json.dumps(rcoms), lp]} for ar in arsms]
-            return aggv4attrds_w
+        aggv4attrds_w = [{str(ar): [str(pnh), json.dumps(rcoms), lp]} for ar in mtrs]
+        return aggv4attrds_w
     except Exception as e:
         logging.getLogger('gobgp_agg_gen.py python3.8').error(host + ' gen_custv4rts loop error:\n' +\
         str(traceback.format_exc()).split('\n')[2] + '\n' + str(traceback.format_exc()).split('\n')[-2])
@@ -115,9 +112,8 @@ def gen_aggv4rts_wp(mitv4rts):
     jcrts = list(filter(None, ((str(sh.jq(sh.gobgp(\
            "global","rib","-a","ipv4","-j"),"-M","-c",".[][] | select(contains({{attrs: [{{communities: [{0}]}}]}}))"\
            .format(dcscm)))).split('\n'))))
-    [pyt4.insert(IPv4Network((json.loads(js))['nlri']['prefix']), None) for js in jcrts]
-    pfxs, mtrs = map(list, zip(*([(pyt4.get_key(mitv4rt),mitv4rt) for mitv4rt in mitv4rts if pyt4.get_key(mitv4rt) != None])))
-    jrts = [js for js in jcrts for pfx in pfxs if (json.loads(js))['nlri']['prefix'] == pfx]
+    [pyt4.insert(IPv4Network((json.loads(js))['nlri']['prefix']), js) for js in jcrts]
+    jrts, mtrs = map(list, zip(*([(pyt4.get(mitv4rt), mitv4rt) for mitv4rt in mitv4rts if pyt4.get_key(mitv4rt) != None])))
     aggv4attrds = []
     with ProcessPoolExecutor(8) as executor:
         futures = [executor.submit(gen_aggv4rts,js,mtrs) for js in jrts]
@@ -128,7 +124,6 @@ def gen_aggv4rts_wp(mitv4rts):
 
 def gen_aggv6rts(js,mtrs):
     try:
-        pfx = (json.loads(js))['nlri']['prefix']
         try:
             pnh = IPv6Address(list(dict.fromkeys([d['value'] for d in \
                     ((json.loads(js))['attrs']) if d['type']==9]))[0]) -1
@@ -140,22 +135,18 @@ def gen_aggv6rts(js,mtrs):
             rcoms = [agcom, rscom]
             rcoms += scoms
             lp = brdlp
-        arsos = list(IPv6Network(pfx).subnets(new_prefix=48))
-        arsms = sorted((list(set(mtrs).intersection(set(arsos)))), key = IPv6Network)
-        if arsms:
-            aggv6attrds_w = [{str(ar): [str(pnh), json.dumps(rcoms), lp]} for ar in arsms]
-            return aggv6attrds_w
+        aggv6attrds_w = [{str(ar): [str(pnh), json.dumps(rcoms), lp]} for ar in mtrs]
+        return aggv6attrds_w
     except Exception as e:
         logging.getLogger('gobgp_agg_gen.py python3.8').error(host + ' gen_custv6rts loop error:\n' +\
         str(traceback.format_exc()).split('\n')[2] + '\n' + str(traceback.format_exc()).split('\n')[-2])
 
-def gen_aggv6rts_wp(mitv6rts,pyt6):
+def gen_aggv6rts_wp(mitv6rts, pyt6):
     jcrts = list(filter(None, ((str(sh.jq(sh.gobgp(\
            "global","rib","-a","ipv6","-j"),"-M","-c",".[][] | select(contains({{attrs: [{{communities: [{0}]}}]}}))"\
            .format(dcscm)))).split('\n'))))
-    [pyt6.insert(IPv6Network((json.loads(js))['nlri']['prefix']), None) for js in jcrts]
-    pfxs, mtrs = map(list, zip(*([(pyt6.get_key(mitv6rt),mitv6rt) for mitv6rt in mitv6rts if pyt6.get_key(mitv6rt) != None])))
-    jrts = [js for js in jcrts for pfx in pfxs if (json.loads(js))['nlri']['prefix'] == pfx]
+    [pyt6.insert(IPv6Network((json.loads(js))['nlri']['prefix']), js) for js in jcrts]
+    jrts, mtrs = map(list, zip(*([(pyt6.get(mitv6rt), mitv6rt) for mitv6rt in mitv6rts if pyt6.get_key(mitv6rt) != None])))
     aggv6attrds = []
     with ProcessPoolExecutor(8) as executor:
         futures = [executor.submit(gen_aggv6rts,js,mtrs) for js in jrts]
@@ -170,15 +161,12 @@ def gen_aggv6rts_wp(mitv6rts,pyt6):
 def update_v4rib(aggv4attrds):
     try:
         addrts = list(dict.fromkeys([k for d in aggv4attrds for k in d.keys()]))
-        print("v4 addrts:",addrts)
         oldrts = list(filter(None,((sh.jq(sh.gobgp(\
                  "global","rib","-a","ipv4","-j"),"-M","-r",".[][] | select\
                  (contains({{attrs: [{{communities: [{0}]}}]}}) and contains({{attrs: [{{communities: [{1}]}}]}})) | .nlri.prefix"\
                  .format(dagcm,drscm)))).split("\n")))
         delrts = list(set(oldrts).difference(addrts))
-        print("v4 delrts:",delrts)
         injrts = list(set(addrts).difference(sorted((list(set(oldrts).intersection(set(addrts)))), key = IPv4Network)))
-        print("v4 injrts:",injrts)
         for injrt in injrts:
             try:
                 nhi = list(dict.fromkeys([d[str(injrt)][0] for d in aggv4attrds if str(injrt) in d]))[0]
@@ -203,15 +191,12 @@ def update_v4rib(aggv4attrds):
 def update_v6rib(aggv6attrds):
     try:
         addrts = list(dict.fromkeys([k for d in aggv6attrds for k in d.keys()]))
-        print("v6 addrts:",addrts)
         oldrts = list(filter(None,((sh.jq(sh.gobgp(\
                  "global","rib","-a","ipv6","-j"),"-M","-r",".[][] | select\
                  (contains({{attrs: [{{communities: [{0}]}}]}}) and contains({{attrs: [{{communities: [{1}]}}]}})) | .nlri.prefix"\
                  .format(dagcm,drscm)))).split("\n")))
         delrts = list(set(oldrts).difference(addrts))
-        print("v6 delrts:",delrts)
         injrts = list(set(addrts).difference(sorted((list(set(oldrts).intersection(set(addrts)))), key = IPv6Network)))
-        print("v6 injrts:",injrts)
         for injrt in injrts:
             try:
                 nhi = list(dict.fromkeys([d[str(injrt)][0] for d in aggv6attrds if str(injrt) in d]))[0]

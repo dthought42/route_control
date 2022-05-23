@@ -3,7 +3,7 @@ GoBGP Virtual Route Server Aggregate Internet Route Generator - Python3.8 - IPv4
 
 The script acts entirely on the route table of the GoBGP virtual router daemon running on a Linux instance. It uses multiprocessing and completes all functions in less than a minute, so it works well as a 1 minute cron job and consumes minimal resources. Whatever scale is needed on the instance to support the size of the GoBGP route-server route table is fine with this script. 
 
-Both IPv4 and IPv6 task sets run in parallel. Core functions of the script rely on the Python ipaddress library.
+Both IPv4 and IPv6 task sets run in parallel. Core functions of the script rely on the ipaddress and pytricia modules.
 For both ipv4/ipv6 tables:
 
     1. Customer routes with Originator attribute(if found) or next-hop attribute and tagged with a "customer" community, 
