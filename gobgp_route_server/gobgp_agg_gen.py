@@ -16,6 +16,10 @@ import socket
 import traceback
 import datetime
 import json
+from pytricia import PyTricia
+import time 
+from time import time as dt
+from pprint import pprint
 
 host = '.'.join(socket.gethostname().split('.')[:2])
 site = yaml.safe_load(open('agg_gen.yml','r')) # settings
@@ -43,6 +47,8 @@ syslog.setLevel(logging.INFO)
 syslog_handler = SysLogHandler(address='/dev/log')
 syslog_handler.setFormatter(formatter)
 syslog.addHandler(syslog_handler)
+pyt6 = PyTricia(128)
+pyt4 = PyTricia(32)
 
 ### Generate v4/v6 /24/48 prefix for each mitigation route(s) from mitigation peer, remove duplicates ###
 def gen_mitv4rts():
@@ -69,7 +75,6 @@ def gen_mitv6rts():
     for mrt in mrts:
         try:
             mrtsnt = IPv6Network(mrt).supernet(new_prefix=48)
-            #mitrts.append(str(mrtsnt))
             mitrts.append(mrtsnt)
         except Exception as e:
             logging.getLogger('gobgp_agg_gen.py python3.8').error(host + ' gen_mitv6rts loop error:\n' +\
@@ -84,7 +89,7 @@ def gen_mitv6rts():
 # - Dynamic dictionary values: community set, next-hop, local-pref
 # - Log errors for invalid customer routes and continue
 
-def gen_aggv4rts(js,mitv4rts):
+def gen_aggv4rts(js,mtrs):
     try:
         pfx = (json.loads(js))['nlri']['prefix']
         try:
@@ -99,7 +104,7 @@ def gen_aggv4rts(js,mitv4rts):
             rcoms += scoms
             lp = brdlp
         arsos = list(IPv4Network(pfx).subnets(new_prefix=24))
-        arsms = sorted((list(set(mitv4rts).intersection(set(arsos)))), key = IPv4Network)
+        arsms = sorted((list(set(mtrs).intersection(set(arsos)))), key = IPv4Network)
         if arsms:
             aggv4attrds_w = [{str(ar): [str(pnh), json.dumps(rcoms), lp]} for ar in arsms]
             return aggv4attrds_w
@@ -108,18 +113,21 @@ def gen_aggv4rts(js,mitv4rts):
         str(traceback.format_exc()).split('\n')[2] + '\n' + str(traceback.format_exc()).split('\n')[-2])
 
 def gen_aggv4rts_wp(mitv4rts):
-    jrts = list(filter(None, ((str(sh.jq(sh.gobgp(\
+    jcrts = list(filter(None, ((str(sh.jq(sh.gobgp(\
            "global","rib","-a","ipv4","-j"),"-M","-c",".[][] | select(contains({{attrs: [{{communities: [{0}]}}]}}))"\
            .format(dcscm)))).split('\n'))))
+    [pyt4.insert(IPv4Network((json.loads(js))['nlri']['prefix']), None) for js in jcrts]
+    pfxs, mtrs = map(list, zip(*([(pyt4.get_key(mitv4rt),mitv4rt) for mitv4rt in mitv4rts if pyt4.get_key(mitv4rt) != None])))
+    jrts = [js for js in jcrts for pfx in pfxs if (json.loads(js))['nlri']['prefix'] == pfx]
     aggv4attrds = []
-    with ProcessPoolExecutor(4) as executor:
-        futures = [executor.submit(gen_aggv4rts,js,mitv4rts) for js in jrts]
+    with ProcessPoolExecutor(8) as executor:
+        futures = [executor.submit(gen_aggv4rts,js,mtrs) for js in jrts]
         for future in as_completed(futures):
             if future.result() != None:
                 aggv4attrds += future.result()
     return aggv4attrds
 
-def gen_aggv6rts(js,mitv6rts):
+def gen_aggv6rts(js,mtrs):
     try:
         pfx = (json.loads(js))['nlri']['prefix']
         try:
@@ -134,7 +142,7 @@ def gen_aggv6rts(js,mitv6rts):
             rcoms += scoms
             lp = brdlp
         arsos = list(IPv6Network(pfx).subnets(new_prefix=48))
-        arsms = sorted((list(set(mitv6rts).intersection(set(arsos)))), key = IPv6Network)
+        arsms = sorted((list(set(mtrs).intersection(set(arsos)))), key = IPv6Network)
         if arsms:
             aggv6attrds_w = [{str(ar): [str(pnh), json.dumps(rcoms), lp]} for ar in arsms]
             return aggv6attrds_w
@@ -142,15 +150,16 @@ def gen_aggv6rts(js,mitv6rts):
         logging.getLogger('gobgp_agg_gen.py python3.8').error(host + ' gen_custv6rts loop error:\n' +\
         str(traceback.format_exc()).split('\n')[2] + '\n' + str(traceback.format_exc()).split('\n')[-2])
 
-def gen_aggv6rts_wp(mitv6rts):
-    jrts = list(filter(None, ((str(sh.jq(sh.gobgp(\
+def gen_aggv6rts_wp(mitv6rts,pyt6):
+    jcrts = list(filter(None, ((str(sh.jq(sh.gobgp(\
            "global","rib","-a","ipv6","-j"),"-M","-c",".[][] | select(contains({{attrs: [{{communities: [{0}]}}]}}))"\
            .format(dcscm)))).split('\n'))))
+    [pyt6.insert(IPv6Network((json.loads(js))['nlri']['prefix']), None) for js in jcrts]
+    pfxs, mtrs = map(list, zip(*([(pyt6.get_key(mitv6rt),mitv6rt) for mitv6rt in mitv6rts if pyt6.get_key(mitv6rt) != None])))
+    jrts = [js for js in jcrts for pfx in pfxs if (json.loads(js))['nlri']['prefix'] == pfx]
     aggv6attrds = []
-    with ProcessPoolExecutor(4) as executor:
-        futures = [executor.submit(gen_aggv6rts,js,mitv6rts) for js in jrts]
-        #print(futures)
-        #print(as_completed(futures))
+    with ProcessPoolExecutor(8) as executor:
+        futures = [executor.submit(gen_aggv6rts,js,mtrs) for js in jrts]
         for future in as_completed(futures):
             if future.result() != None:
                 aggv6attrds += future.result()
@@ -239,7 +248,7 @@ def ipv4_fs():
 def ipv6_fs():
     try:
         mitv6rts = gen_mitv6rts()
-        aggv6attrds = gen_aggv6rts_wp(mitv6rts)
+        aggv6attrds = gen_aggv6rts_wp(mitv6rts,pyt6)
         update_v6rib(aggv6attrds)
         logging.getLogger('gobgp_agg_gen.py python3.8').info('{} ipv6 agg routes updated'.format(host))
     except Exception as e:
