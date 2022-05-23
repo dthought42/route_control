@@ -17,9 +17,6 @@ import traceback
 import datetime
 import json
 from pytricia import PyTricia
-import time 
-from time import time as dt
-from pprint import pprint
 
 host = '.'.join(socket.gethostname().split('.')[:2])
 site = yaml.safe_load(open('agg_gen.yml','r')) # settings
@@ -84,6 +81,8 @@ def gen_mitv6rts():
     return mitv6rts
 
 # Generate v4/v6 /24/48 aggregate route prefixes:
+# v4/v6 customer/mitigation Patricia trie matching - PyTricia
+# - https://github.com/jsommers/pytricia
 # With nested multiprocessing for each gre advertised customer route:
 # - Generate lists of ipv4/v6 /24/48 prefixes & attribute dictionary w/ prefix key
 # - Dynamic dictionary values: community set, next-hop, local-pref
