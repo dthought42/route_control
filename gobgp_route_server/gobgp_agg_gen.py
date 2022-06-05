@@ -1,6 +1,5 @@
 #!/usr/bin/python3.8
 # gobgp_agg_gen
-# David Weber - Network Automation Engineer
 
 from ipaddress import IPv4Address, IPv4Network, IPv6Address, IPv6Network
 import yaml
@@ -23,7 +22,6 @@ from pprint import pprint
 
 host = '.'.join(socket.gethostname().split('.')[:2])
 site = yaml.safe_load(open('agg_gen.yml','r')) # settings
-slack_token = site['slack_token'] # slack channel token
 scoms = site['scoms'][host.split('.')[1]] # site specific aggregate communities
 btecm = site['btecm'] # bgp-te type-customer-originated community
 agcom = site['agcom'] # conditional static aggregate community
@@ -157,7 +155,7 @@ def gen_aggv6rts_wp(mitv6rts, pyt6):
                 aggv6attrds += future.result()
     return aggv6attrds
 
-# inject /24/48 agg routes w/ attributes if not already in RIB
+# inject v4/v6 /24/48 agg routes w/ attributes if not already in RIB
 # remove old routes if not in addrts
 
 def update_v4rib(aggv4attrds):
